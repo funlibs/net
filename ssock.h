@@ -11,6 +11,27 @@
 #define TCP 1
 #define UDP 0
 
+#define HOST_TYPE 0
+#define PORT_TYPE 1
+#define LOCATION_TYPE 2
+#define FORM_TYPE 3
+
+char*
+parseurl(char* uri, int type) {
+    char* val = NULL;
+    if (type == PORT_TYPE) {
+
+    } else if (type == HOST_TYPE) {
+
+    } else if (type == LOCATION_TYPE) {
+
+    } else if (type == FORM_TYPE) {
+
+    }
+
+    return val;
+}
+
 static int
 parseip(char *name, uint32_t *ip) {
     unsigned char addr[4];
