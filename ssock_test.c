@@ -37,6 +37,7 @@ main(int argc, char** argv) {
     }
     closesocket(fd);
 
+    netdial_ssl();
     return (EXIT_SUCCESS);
 }
 
