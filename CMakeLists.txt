@@ -6,7 +6,7 @@ configure_file(
 
 find_package(OpenSSL REQUIRED)
 
-set (SSOCK_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/. ${OPENSSL_INCLUDE_DIR} CACHE STRING "sock_includes")
+set (SSOCK_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${OPENSSL_INCLUDE_DIR} CACHE STRING "sock_includes")
 set (SSOCK_LIBRARIES  ${OPENSSL_LIBRARIES} CACHE STRING "sock_openssl")
 
 include_directories(${SSOCK_INCLUDES})
