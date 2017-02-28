@@ -16,6 +16,12 @@
 #define LOCATION_TYPE 2
 #define FORM_TYPE 3
 
+void
+closesocket(int socket) {
+    shutdown(socket, SHUT_RDWR);
+    close(socket);
+}
+
 char*
 parseurl(char* uri, int type) {
     char* val = NULL;

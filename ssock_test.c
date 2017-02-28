@@ -35,6 +35,7 @@ main(int argc, char** argv) {
             printf("%s", payload);
         }
     }
+    closesocket(fd);
 
     return (EXIT_SUCCESS);
 }
