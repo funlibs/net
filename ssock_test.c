@@ -25,7 +25,7 @@ main(int argc, char** argv) {
     int fd, count;
     char payload[PAYLOAD_MAX + 1];
 
-    if ((fd = netdial(TCP, "www.example.com", 80)) < 0) {
+    if ((fd = netdial(NET_TCP, "www.example.com", 80)) < 0) {
         return (EXIT_FAILURE);
     }
 
@@ -37,7 +37,9 @@ main(int argc, char** argv) {
     }
     closesocket(fd);
 
-    netdial_ssl();
+    fd = netdial(NET_SSL, "www.hp.com", 443);
+    closesocket(fd);
+
     return (EXIT_SUCCESS);
 }
 

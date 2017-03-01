@@ -17,36 +17,71 @@
 #include <openssl/x509_vfy.h>
 
 #define CLASS(p) ((*(unsigned char*)(p))>>6)
-#define TCP 1
-#define UDP 0
+#define NET_UDP 0
+#define NET_TCP 1
+#define NET_SSL 2
+
 
 #define HOST_TYPE 0
 #define PORT_TYPE 1
 #define LOCATION_TYPE 2
 #define FORM_TYPE 3
 
-int create_socket(char url_str[], BIO *out);
+X509 *cert = NULL;
+SSL_CTX *ctx = NULL;
+SSL *ssl = NULL;
+
+void
+parseurl(char url_str[]) {
+    char hostname[256] = "";
+    char portnum[6] = "443";
+    char proto[6] = "";
+    char *tmp_ptr = NULL;
+    int port;
+    struct hostent *host;
+    struct sockaddr_in dest_addr;
+
+    /* ---------------------------------------------------------- *
+     * Remove the final / from url_str, if there is one           *
+     * ---------------------------------------------------------- */
+    if (url_str[strlen(url_str)] == '/')
+        url_str[strlen(url_str)] = '\0';
+
+    /* ---------------------------------------------------------- *
+     * the first : ends the protocol string, i.e. http            *
+     * ---------------------------------------------------------- */
+    strncpy(proto, url_str, (strchr(url_str, ':') - url_str));
+
+    /* ---------------------------------------------------------- *
+     * the hostname starts after the "://" part                   *
+     * ---------------------------------------------------------- */
+    strncpy(hostname, strstr(url_str, "://") + 3, sizeof (hostname));
+
+    /* ---------------------------------------------------------- *
+     * if the hostname contains a colon :, we got a port number   *
+     * ---------------------------------------------------------- */
+    if (strchr(hostname, ':')) {
+        tmp_ptr = strchr(hostname, ':');
+        /* the last : starts the port number, if avail, i.e. 8443 */
+        strncpy(portnum, tmp_ptr + 1, sizeof (portnum));
+        *tmp_ptr = '\0';
+    }
+
+}
 
 void
 closesocket(int socket) {
+    if (ssl != NULL) {
+        SSL_free(ssl);
+    }
     shutdown(socket, SHUT_RDWR);
     close(socket);
-}
-
-char*
-parseurl(char* uri, int type) {
-    char* val = NULL;
-    if (type == PORT_TYPE) {
-
-    } else if (type == HOST_TYPE) {
-
-    } else if (type == LOCATION_TYPE) {
-
-    } else if (type == FORM_TYPE) {
-
+    if (cert != NULL) {
+        X509_free(cert);
     }
-
-    return val;
+    if (ctx != NULL) {
+        SSL_CTX_free(ctx);
+    }
 }
 
 static int
@@ -110,6 +145,15 @@ netlookup(char *name, uint32_t *ip) {
 
 int
 netdial(int istcp, char *server, int port) {
+    if (istcp == NET_SSL) {
+        return netdialssl(server, port);
+    } else {
+        return netdialall(istcp, server, port);
+    }
+}
+
+int
+netdialall(int istcp, char *server, int port) {
     int proto, fd, n;
     uint32_t ip;
     struct sockaddr_in sa;
@@ -154,184 +198,101 @@ netdial(int istcp, char *server, int port) {
     return -1;
 }
 
-/* ---------------------------------------------------------- *
- * create_socket() creates the socket & TCP-connect to server *
- * ---------------------------------------------------------- */
-int create_socket(char url_str[], BIO *out) {
-  int sockfd;
-  char hostname[256] = "";
-  char    portnum[6] = "443";
-  char      proto[6] = "";
-  char      *tmp_ptr = NULL;
-  int           port;
-  struct hostent *host;
-  struct sockaddr_in dest_addr;
+int
+netdialssl(char *server, int port) {
 
-  /* ---------------------------------------------------------- *
-   * Remove the final / from url_str, if there is one           *
-   * ---------------------------------------------------------- */
-  if(url_str[strlen(url_str)] == '/')
-    url_str[strlen(url_str)] = '\0';
+    char dest_url[] = "https://www.hp.com";
+    BIO *certbio = NULL;
+    X509_NAME *certname = NULL;
+    const SSL_METHOD *method;
 
-  /* ---------------------------------------------------------- *
-   * the first : ends the protocol string, i.e. http            *
-   * ---------------------------------------------------------- */
-  strncpy(proto, url_str, (strchr(url_str, ':')-url_str));
 
-  /* ---------------------------------------------------------- *
-   * the hostname starts after the "://" part                   *
-   * ---------------------------------------------------------- */
-  strncpy(hostname, strstr(url_str, "://")+3, sizeof(hostname));
+    int socket = 0;
+    int ret, i;
 
-  /* ---------------------------------------------------------- *
-   * if the hostname contains a colon :, we got a port number   *
-   * ---------------------------------------------------------- */
-  if(strchr(hostname, ':')) {
-    tmp_ptr = strchr(hostname, ':');
-    /* the last : starts the port number, if avail, i.e. 8443 */
-    strncpy(portnum, tmp_ptr+1,  sizeof(portnum));
-    *tmp_ptr = '\0';
-  }
+    /* ---------------------------------------------------------- *
+     * These function calls initialize openssl for correct work.  *
+     * ---------------------------------------------------------- */
+    OpenSSL_add_all_algorithms();
+    ERR_load_BIO_strings();
+    ERR_load_crypto_strings();
+    SSL_load_error_strings();
 
-  port = atoi(portnum);
+    /* ---------------------------------------------------------- *
+     * Create the Input/Output BIO's.                             *
+     * ---------------------------------------------------------- */
+    certbio = BIO_new(BIO_s_file());
 
-  if ( (host = gethostbyname(hostname)) == NULL ) {
-    BIO_printf(out, "Error: Cannot resolve hostname %s.\n",  hostname);
-    abort();
-  }
+    /* ---------------------------------------------------------- *
+     * initialize SSL library and register algorithms             *
+     * ---------------------------------------------------------- */
+    if (SSL_library_init() < 0)
+        printf("Could not initialize the OpenSSL library !\n");
 
-  /* ---------------------------------------------------------- *
-   * create the basic TCP socket                                *
-   * ---------------------------------------------------------- */
-  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    /* ---------------------------------------------------------- *
+     * Set SSLv2 client hello, also announce SSLv3 and TLSv1      *
+     * ---------------------------------------------------------- */
+    method = SSLv23_client_method();
 
-  dest_addr.sin_family=AF_INET;
-  dest_addr.sin_port=htons(port);
-  dest_addr.sin_addr.s_addr = *(long*)(host->h_addr);
+    /* ---------------------------------------------------------- *
+     * Try to create a new SSL context                            *
+     * ---------------------------------------------------------- */
+    if ((ctx = SSL_CTX_new(method)) == NULL)
+        printf("Unable to create a new SSL context structure.\n");
 
-  /* ---------------------------------------------------------- *
-   * Zeroing the rest of the struct                             *
-   * ---------------------------------------------------------- */
-  memset(&(dest_addr.sin_zero), '\0', 8);
+    /* ---------------------------------------------------------- *
+     * Disabling SSLv2 will leave v3 and TSLv1 for negotiation    *
+     * ---------------------------------------------------------- */
+    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
 
-  tmp_ptr = inet_ntoa(dest_addr.sin_addr);
+    /* ---------------------------------------------------------- *
+     * Create new SSL connection state object                     *
+     * ---------------------------------------------------------- */
+    ssl = SSL_new(ctx);
 
-  /* ---------------------------------------------------------- *
-   * Try to make the host connect here                          *
-   * ---------------------------------------------------------- */
-  if ( connect(sockfd, (struct sockaddr *) &dest_addr,
-                              sizeof(struct sockaddr)) == -1 ) {
-    BIO_printf(out, "Error: Cannot connect to host %s [%s] on port %d.\n",
-             hostname, tmp_ptr, port);
-  }
+    /* ---------------------------------------------------------- *
+     * Make the underlying TCP socket connection                  *
+     * ---------------------------------------------------------- */
+    socket = netdialall(NET_TCP, "www.hp.com", 443);
+    if (socket != 0)
+        printf("Successfully made the TCP connection to: %s.\n", dest_url);
 
-  return sockfd;
-}
+    /* ---------------------------------------------------------- *
+     * Attach the SSL session to the socket descriptor            *
+     * ---------------------------------------------------------- */
+    SSL_set_fd(ssl, socket);
 
-int netdial_ssl() {
+    /* ---------------------------------------------------------- *
+     * Try to SSL-connect here, returns 1 for success             *
+     * ---------------------------------------------------------- */
+    if (SSL_connect(ssl) != 1)
+        printf("Error: Could not build a SSL session to: %s.\n", dest_url);
+    else
+        printf("Successfully enabled SSL/TLS session to: %s.\n", dest_url);
 
-  char           dest_url[] = "https://www.hp.com";
-  BIO              *certbio = NULL;
-  BIO               *outbio = NULL;
-  X509                *cert = NULL;
-  X509_NAME       *certname = NULL;
-  const SSL_METHOD *method;
-  SSL_CTX *ctx;
-  SSL *ssl;
-  int server = 0;
-  int ret, i;
+    /* ---------------------------------------------------------- *
+     * Get the remote certificate into the X509 structure         *
+     * ---------------------------------------------------------- */
+    cert = SSL_get_peer_certificate(ssl);
+    if (cert == NULL)
+        printf("Error: Could not get a certificate from: %s.\n", dest_url);
+    else
+        printf("Retrieved the server's certificate from: %s.\n", dest_url);
 
-  /* ---------------------------------------------------------- *
-   * These function calls initialize openssl for correct work.  *
-   * ---------------------------------------------------------- */
-  OpenSSL_add_all_algorithms();
-  ERR_load_BIO_strings();
-  ERR_load_crypto_strings();
-  SSL_load_error_strings();
+    /* ---------------------------------------------------------- *
+     * extract various certificate information                    *
+     * -----------------------------------------------------------*/
+    certname = X509_NAME_new();
+    certname = X509_get_subject_name(cert);
 
-  /* ---------------------------------------------------------- *
-   * Create the Input/Output BIO's.                             *
-   * ---------------------------------------------------------- */
-  certbio = BIO_new(BIO_s_file());
-  outbio  = BIO_new_fp(stdout, BIO_NOCLOSE);
+    /* ---------------------------------------------------------- *
+     * display the cert subject here                              *
+     * -----------------------------------------------------------
+    printf("Displaying the certificate subject data:\n");
+    X509_NAME_print_ex(outbio, certname, 0, 0);
+    printf("\n");
+     */
 
-  /* ---------------------------------------------------------- *
-   * initialize SSL library and register algorithms             *
-   * ---------------------------------------------------------- */
-  if(SSL_library_init() < 0)
-    BIO_printf(outbio, "Could not initialize the OpenSSL library !\n");
-
-  /* ---------------------------------------------------------- *
-   * Set SSLv2 client hello, also announce SSLv3 and TLSv1      *
-   * ---------------------------------------------------------- */
-  method = SSLv23_client_method();
-
-  /* ---------------------------------------------------------- *
-   * Try to create a new SSL context                            *
-   * ---------------------------------------------------------- */
-  if ( (ctx = SSL_CTX_new(method)) == NULL)
-    BIO_printf(outbio, "Unable to create a new SSL context structure.\n");
-
-  /* ---------------------------------------------------------- *
-   * Disabling SSLv2 will leave v3 and TSLv1 for negotiation    *
-   * ---------------------------------------------------------- */
-  SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
-
-  /* ---------------------------------------------------------- *
-   * Create new SSL connection state object                     *
-   * ---------------------------------------------------------- */
-  ssl = SSL_new(ctx);
-
-  /* ---------------------------------------------------------- *
-   * Make the underlying TCP socket connection                  *
-   * ---------------------------------------------------------- */
-  server = create_socket(dest_url, outbio);
-  if(server != 0)
-    BIO_printf(outbio, "Successfully made the TCP connection to: %s.\n", dest_url);
-
-  /* ---------------------------------------------------------- *
-   * Attach the SSL session to the socket descriptor            *
-   * ---------------------------------------------------------- */
-  SSL_set_fd(ssl, server);
-
-  /* ---------------------------------------------------------- *
-   * Try to SSL-connect here, returns 1 for success             *
-   * ---------------------------------------------------------- */
-  if ( SSL_connect(ssl) != 1 )
-    BIO_printf(outbio, "Error: Could not build a SSL session to: %s.\n", dest_url);
-  else
-    BIO_printf(outbio, "Successfully enabled SSL/TLS session to: %s.\n", dest_url);
-
-  /* ---------------------------------------------------------- *
-   * Get the remote certificate into the X509 structure         *
-   * ---------------------------------------------------------- */
-  cert = SSL_get_peer_certificate(ssl);
-  if (cert == NULL)
-    BIO_printf(outbio, "Error: Could not get a certificate from: %s.\n", dest_url);
-  else
-    BIO_printf(outbio, "Retrieved the server's certificate from: %s.\n", dest_url);
-
-  /* ---------------------------------------------------------- *
-   * extract various certificate information                    *
-   * -----------------------------------------------------------*/
-  certname = X509_NAME_new();
-  certname = X509_get_subject_name(cert);
-
-  /* ---------------------------------------------------------- *
-   * display the cert subject here                              *
-   * -----------------------------------------------------------*/
-  BIO_printf(outbio, "Displaying the certificate subject data:\n");
-  X509_NAME_print_ex(outbio, certname, 0, 0);
-  BIO_printf(outbio, "\n");
-
-  /* ---------------------------------------------------------- *
-   * Free the structures we don't need anymore                  *
-   * -----------------------------------------------------------*/
-  SSL_free(ssl);
-  close(server);
-  X509_free(cert);
-  SSL_CTX_free(ctx);
-  BIO_printf(outbio, "Finished SSL/TLS connection with server: %s.\n", dest_url);
-  return(0);
+    return socket;
 }
 
