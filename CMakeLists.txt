@@ -6,17 +6,13 @@ configure_file(
 
 find_package(OpenSSL REQUIRED)
 
-set (SSOCK_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${OPENSSL_INCLUDE_DIR} CACHE STRING "sock_includes")
-set (SSOCK_LIBRARIES  ${OPENSSL_LIBRARIES} CACHE STRING "sock_openssl")
+set (SSOCK_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${OPENSSL_INCLUDE_DIR} CACHE STRING "net_includes")
+set (SSOCK_LIBRARIES  ${OPENSSL_LIBRARIES} CACHE STRING "net_openssl")
 
 include_directories(${SSOCK_INCLUDES})
 
-add_executable(testssl
-    testssl.c)
+add_executable(net_exemple
+    net_exemple.c
+    net.h)
 
-add_executable(ssock_test
-    ssock_test.c
-    ssock.h)
-
-target_link_libraries(testssl ${OPENSSL_LIBRARIES})
-target_link_libraries(ssock_test ${OPENSSL_LIBRARIES})
+target_link_libraries(net_exemple ${OPENSSL_LIBRARIES})

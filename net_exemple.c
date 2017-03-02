@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ssock.h>
+#include <net.h>
 
 char HTTP_GET[] =
         "GET / HTTP/1.0\r\n"
@@ -53,11 +53,6 @@ main(int argc, char** argv) {
     }
 
     closenetsocket(socket);
-
-    /*
-    fd = netdial(NET_SSL, "www.hp.com", 443);
-    closesocket(fd);
-     */
 
     return (EXIT_SUCCESS);
 }
