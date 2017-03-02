@@ -20,6 +20,9 @@ char HTTP_GET[] =
 
 /*
  *
+ * Usage:
+ * net_example ssl www.example.com
+ * net_example nossl www.example.com
  */
 int
 main(int argc, char** argv) {
@@ -42,6 +45,7 @@ main(int argc, char** argv) {
     socket = netdial(net_type, argv[2], port);
 
     if (socket.fd < 0) {
+        printf("ERROR: %i\n", socket.status);
         return (EXIT_FAILURE);
     }
 
