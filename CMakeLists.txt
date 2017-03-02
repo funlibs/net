@@ -1,15 +1,15 @@
 cmake_minimum_required (VERSION 2.6)
-project (ssock)
+project (net)
 
 configure_file(
     ${CMAKE_SOURCE_DIR}/Makefile.in ${CMAKE_SOURCE_DIR}/Makefile)
 
 find_package(OpenSSL REQUIRED)
 
-set (SSOCK_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${OPENSSL_INCLUDE_DIR} CACHE STRING "net_includes")
-set (SSOCK_LIBRARIES  ${OPENSSL_LIBRARIES} CACHE STRING "net_openssl")
+set (NET_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR} ${OPENSSL_INCLUDE_DIR} CACHE STRING "net_includes")
+set (NET_LIBRARIES  ${OPENSSL_LIBRARIES} CACHE STRING "net_openssl")
 
-include_directories(${SSOCK_INCLUDES})
+include_directories(${NET_INCLUDES})
 
 add_executable(net_exemple
     net_exemple.c
