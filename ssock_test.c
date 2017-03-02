@@ -47,10 +47,7 @@ main(int argc, char** argv) {
 
     snprintf(request, REQUEST_MAX, HTTP_GET, argv[2]);
     if (netwrite(socket, request, strlen(request)) >= 0) {
-        printf("after write\n");
-
         while ((count = netread(socket, payload, PAYLOAD_MAX)) > 0) {
-            printf("while read %i\n", strlen(payload));
             printf("%s", payload);
         }
     }
