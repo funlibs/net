@@ -13,32 +13,54 @@
 
 char HTTP_GET[] =
         "GET / HTTP/1.0\r\n"
-        "Host: www.example.com\r\n\r\n";
+        "Host: %s\r\n\r\n";
 
 #define PAYLOAD_MAX 100000
+#define REQUEST_MAX 100000
 
 /*
  *
  */
 int
 main(int argc, char** argv) {
-    int fd, count;
-    char payload[PAYLOAD_MAX + 1];
+    int count, net_type, port;
+    char payload[PAYLOAD_MAX + 1], request[REQUEST_MAX + 1];
+    netsocket socket;
 
-    if ((fd = netdial(NET_TCP, "www.example.com", 80)) < 0) {
+    if (argc < 3) {
+        printf("no enought args");
         return (EXIT_FAILURE);
     }
 
+    port = 80;
+    net_type = NET_TCP;
+    if (strcmp(argv[1], "ssl") == 0) {
+        port = 443;
+        net_type = NET_SSL;
+    }
 
-    if (write(fd, HTTP_GET, strlen(HTTP_GET)) >= 0) {
-        while ((count = read(fd, payload, PAYLOAD_MAX)) > 0) {
+    socket = netdial(net_type, argv[2], port);
+
+    if (socket.fd < 0) {
+        return (EXIT_FAILURE);
+    }
+
+    snprintf(request, REQUEST_MAX, HTTP_GET, argv[2]);
+    if (netwrite(socket, request, strlen(request)) >= 0) {
+        printf("after write\n");
+
+        while ((count = netread(socket, payload, PAYLOAD_MAX)) > 0) {
+            printf("while read %i\n", strlen(payload));
             printf("%s", payload);
         }
     }
-    closesocket(fd);
 
+    closenetsocket(socket);
+
+    /*
     fd = netdial(NET_SSL, "www.hp.com", 443);
     closesocket(fd);
+     */
 
     return (EXIT_SUCCESS);
 }

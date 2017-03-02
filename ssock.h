@@ -27,9 +27,31 @@
 #define LOCATION_TYPE 2
 #define FORM_TYPE 3
 
-X509 *cert = NULL;
-SSL_CTX *ctx = NULL;
-SSL *ssl = NULL;
+typedef struct {
+    X509 *cert;
+    SSL_CTX *ctx;
+    SSL *ssl;
+    int fd;
+} netsocket;
+
+netsocket
+closenetsocket(netsocket socket) {
+    netsocket empty = {NULL, NULL, NULL, -1};
+    if (socket.fd > 0) {
+        close(socket.fd);
+    }
+    if (socket.ssl != NULL) {
+        SSL_free(socket.ssl);
+    }
+    if (socket.cert != NULL) {
+        X509_free(socket.cert);
+    }
+    if (socket.ctx != NULL) {
+        SSL_CTX_free(socket.ctx);
+    }
+
+    return empty;
+}
 
 void
 parseurl(char url_str[]) {
@@ -67,21 +89,6 @@ parseurl(char url_str[]) {
         *tmp_ptr = '\0';
     }
 
-}
-
-void
-closesocket(int socket) {
-    if (ssl != NULL) {
-        SSL_free(ssl);
-    }
-    shutdown(socket, SHUT_RDWR);
-    close(socket);
-    if (cert != NULL) {
-        X509_free(cert);
-    }
-    if (ctx != NULL) {
-        SSL_CTX_free(ctx);
-    }
 }
 
 static int
@@ -144,27 +151,41 @@ netlookup(char *name, uint32_t *ip) {
 }
 
 int
-netdial(int istcp, char *server, int port) {
-    if (istcp == NET_SSL) {
-        return netdialssl(server, port);
+netwrite(netsocket socket, char* payload, int size) {
+
+    if (socket.ssl != NULL) {
+        return SSL_write(socket.ssl, payload, size);
     } else {
-        return netdialall(istcp, server, port);
+        return write(socket.fd, payload, size);
     }
+
 }
 
 int
-netdialall(int istcp, char *server, int port) {
+netread(netsocket socket, char* payload, int size) {
+
+    if (socket.ssl != NULL) {
+        return SSL_read(socket.ssl, payload, size);
+    } else {
+        return read(socket.fd, payload, size);
+    }
+
+}
+
+netsocket
+netdialtcp(int istcp, char *server, int port) {
     int proto, fd, n;
     uint32_t ip;
     struct sockaddr_in sa;
     socklen_t sn;
+    netsocket net_socket = {NULL, NULL, NULL, -1};
 
     if (netlookup(server, &ip) < 0)
-        return -1;
+        return net_socket;
 
     proto = istcp ? SOCK_STREAM : SOCK_DGRAM;
     if ((fd = socket(AF_INET, proto, 0)) < 0) {
-        return -1;
+        return net_socket;
     }
 
     /* for udp */
@@ -180,12 +201,13 @@ netdialall(int istcp, char *server, int port) {
     sa.sin_port = htons(port);
     if (connect(fd, (struct sockaddr*) &sa, sizeof sa) < 0 && errno != EINPROGRESS) {
         close(fd);
-        return -1;
+        return net_socket;
     }
 
     sn = sizeof sa;
     if (getpeername(fd, (struct sockaddr*) &sa, &sn) >= 0) {
-        return fd;
+        net_socket.fd = fd;
+        return net_socket;
     }
 
     /* report error */
@@ -195,19 +217,16 @@ netdialall(int istcp, char *server, int port) {
         n = ECONNREFUSED;
     close(fd);
     errno = n;
-    return -1;
+    return closenetsocket(net_socket);
 }
 
-int
-netdialssl(char *server, int port) {
+netsocket
+netdialssl(int istcp, char *server, int port) {
 
-    char dest_url[] = "https://www.hp.com";
     BIO *certbio = NULL;
     X509_NAME *certname = NULL;
     const SSL_METHOD *method;
-
-
-    int socket = 0;
+    netsocket socket = {NULL, NULL, NULL, -1}, tcpsocket;
     int ret, i;
 
     /* ---------------------------------------------------------- *
@@ -237,53 +256,64 @@ netdialssl(char *server, int port) {
     /* ---------------------------------------------------------- *
      * Try to create a new SSL context                            *
      * ---------------------------------------------------------- */
-    if ((ctx = SSL_CTX_new(method)) == NULL)
+    if ((socket.ctx = SSL_CTX_new(method)) == NULL) {
         printf("Unable to create a new SSL context structure.\n");
+        return closenetsocket(socket);
+    }
 
     /* ---------------------------------------------------------- *
      * Disabling SSLv2 will leave v3 and TSLv1 for negotiation    *
      * ---------------------------------------------------------- */
-    SSL_CTX_set_options(ctx, SSL_OP_NO_SSLv2);
+    SSL_CTX_set_options(socket.ctx, SSL_OP_NO_SSLv2);
 
     /* ---------------------------------------------------------- *
      * Create new SSL connection state object                     *
      * ---------------------------------------------------------- */
-    ssl = SSL_new(ctx);
+    socket.ssl = SSL_new(socket.ctx);
 
     /* ---------------------------------------------------------- *
      * Make the underlying TCP socket connection                  *
      * ---------------------------------------------------------- */
-    socket = netdialall(NET_TCP, "www.hp.com", 443);
-    if (socket != 0)
-        printf("Successfully made the TCP connection to: %s.\n", dest_url);
+    tcpsocket = netdialtcp(istcp, server, port);
+    socket.fd = tcpsocket.fd;
+
+    if (socket.fd > 0) {
+        printf("Successfully made the TCP connection to: %s.\n", server);
+    } else {
+        return closenetsocket(socket);
+    }
 
     /* ---------------------------------------------------------- *
      * Attach the SSL session to the socket descriptor            *
      * ---------------------------------------------------------- */
-    SSL_set_fd(ssl, socket);
+    SSL_set_fd(socket.ssl, socket.fd);
 
     /* ---------------------------------------------------------- *
      * Try to SSL-connect here, returns 1 for success             *
      * ---------------------------------------------------------- */
-    if (SSL_connect(ssl) != 1)
-        printf("Error: Could not build a SSL session to: %s.\n", dest_url);
-    else
-        printf("Successfully enabled SSL/TLS session to: %s.\n", dest_url);
+    if (SSL_connect(socket.ssl) != 1) {
+        printf("Error: Could not build a SSL session to: %s.\n", server);
+        return closenetsocket(socket);
+    } else
+        printf("Successfully enabled SSL/TLS session to: %s.\n", server);
 
     /* ---------------------------------------------------------- *
      * Get the remote certificate into the X509 structure         *
      * ---------------------------------------------------------- */
-    cert = SSL_get_peer_certificate(ssl);
-    if (cert == NULL)
-        printf("Error: Could not get a certificate from: %s.\n", dest_url);
-    else
-        printf("Retrieved the server's certificate from: %s.\n", dest_url);
+    socket.cert = SSL_get_peer_certificate(socket.ssl);
+    if (socket.cert == NULL) {
+        printf("Error: Could not get a certificate from: %s.\n", server);
+        return closenetsocket(socket);
+    } else
+        printf("Retrieved the server's certificate from: %s.\n", server);
 
     /* ---------------------------------------------------------- *
      * extract various certificate information                    *
      * -----------------------------------------------------------*/
+    /*
     certname = X509_NAME_new();
     certname = X509_get_subject_name(cert);
+     */
 
     /* ---------------------------------------------------------- *
      * display the cert subject here                              *
@@ -296,3 +326,13 @@ netdialssl(char *server, int port) {
     return socket;
 }
 
+netsocket
+netdial(int istcp, char *server, int port) {
+    if (istcp == NET_SSL) {
+        //return netdialssl(server, port);
+        return netdialssl(istcp, server, port);
+
+    } else {
+        return netdialtcp(istcp, server, port);
+    }
+}
