@@ -11,8 +11,8 @@ set (NET_LIBRARIES  ${OPENSSL_LIBRARIES} CACHE STRING "net_openssl")
 
 include_directories(${NET_INCLUDES})
 
-add_executable(net_exemple
-    net_exemple.c
+add_executable(net_http_client
+    net_http_client.c
     net.h)
 
-target_link_libraries(net_exemple ${OPENSSL_LIBRARIES})
+target_link_libraries(net_http_client ${OPENSSL_LIBRARIES})

@@ -109,7 +109,7 @@ extern "C" {
      * Cleanup netsocket structure.
      */
     void
-    closenetsocket(netsocket socket) {
+    netclose(netsocket socket) {
         resumenetsocket(socket, NET_STATUS_OK);
     }
 

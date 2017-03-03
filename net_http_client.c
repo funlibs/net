@@ -1,5 +1,5 @@
 /*
- * File:   ssock_test.c
+ * File:   net_http_client.c
  * Author: Sébastien Serre <sserre at msha.fr>
  *
  * Created on 27 février 2017, 16:58
@@ -56,7 +56,7 @@ main(int argc, char** argv) {
         }
     }
 
-    closenetsocket(socket);
+    netclose(socket);
 
     return (EXIT_SUCCESS);
 }
