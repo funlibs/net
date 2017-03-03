@@ -45,7 +45,7 @@ main(int argc, char** argv) {
     socket = netdial(net_type, argv[2], port);
 
     if (socket.fd < 0) {
-        printf("ERROR: %i\n", socket.status);
+        printf("ERROR: %s\n", getnetstatus(socket.status));
         return (EXIT_FAILURE);
     }
 

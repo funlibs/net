@@ -43,37 +43,45 @@
 
 #define CLASS(p) ((*(unsigned char*)(p))>>6)
 
-#define NET_UDP 0
-#define NET_TCP 1
-#define NET_SSL 2
-
-#define NET_STATUS_OK 0
-#define NET_STATUS_OK_STR "ok"
-#define NET_STATUS_RESOLV_ERROR 1
-#define NET_STATUS_RESOLV_ERROR_STR "Can not resolve the hostname"
-#define NET_STATUS_TCP_EINPROGRESS_ERROR 2
-#define NET_STATUS_TCP_EINPROGRESS_ERROR_STR "TCP can not complete connexion"
-#define NET_STATUS_TCP_ECONNREFUSED_ERROR 3
-#define NET_STATUS_TCP_ECONNREFUSED_ERROR_STR "TCP connexion refused"
-#define NET_STATUS_TCP_ERROR 4
-#define NET_STATUS_TCP_ERROR_STR "TCP error"
-#define NET_STATUS_SSL_CONTEXT_ERROR 5
-#define NET_STATUS_SSL_CONTEXT_ERROR_STR "SSL context error"
-#define NET_STATUS_SSL_SESSION_ERROR 6
-#define NET_STATUS_SSL_SESSION_ERROR_STR "SSL session error"
-#define NET_STATUS_SSL_CERT_ERROR 7
-#define NET_STATUS_SSL_CERT_ERROR_STR "SSL certificate error"
-#define NET_STATUS_SSL_INIT_ERROR 8
-#define NET_STATUS_SSL_INIT_ERROR_STR "SSL init error"
-
-#define TYPE_HOST 0
-#define TYPE_PORT 1
-#define TYPE_LOCATION 2
-#define TYPE_FORM 3
 
 #ifdef __cplusplus
 extern "C" {
 #endif //__cplusplus
+
+    enum {
+        NET_TYPE_HOST,
+        NET_TYPE_PORT,
+        NET_TYPE_LOCATION,
+        NET_TYPE_FORM
+    };
+
+    enum {
+        NET_UDP,
+        NET_TCP,
+        NET_SSL
+    };
+
+    enum {
+        NET_STATUS_OK,
+        NET_STATUS_RESOLV_ERROR,
+        NET_STATUS_TCP_EINPROGRESS_ERROR,
+        NET_STATUS_TCP_ECONNREFUSED_ERROR,
+        NET_STATUS_TCP_ERROR,
+        NET_STATUS_SSL_CONTEXT_ERROR,
+        NET_STATUS_SSL_SESSION_ERROR,
+        NET_STATUS_SSL_CERT_ERROR,
+        NET_STATUS_SSL_INIT_ERROR
+    };
+
+    char* net_status_ok_str = "ok";
+    char* net_status_resolv_error_str = "Can not resolve the hostname";
+    char* net_status_tcp_einprogress_error_str = "TCP can not complete connexion";
+    char* net_status_tcp_econnrefused_error_str = "TCP connexion refused";
+    char* net_status_tcp_error_str = "TCP error";
+    char* net_status_ssl_context_error_str = "SSL context error";
+    char* net_status_ssl_session_error_str = "SSL session error";
+    char* net_status_ssl_cert_error_str = "SSL certificate error";
+    char* net_status_ssl_init_error_str = "SSL init error";
 
     typedef struct {
         X509 *cert;
@@ -83,11 +91,35 @@ extern "C" {
         int status;
     } netsocket;
 
+    char*
+    getnetstatus(int status) {
+        switch (status) {
+            case NET_STATUS_OK:
+                return net_status_ok_str;
+            case NET_STATUS_RESOLV_ERROR:
+                return net_status_resolv_error_str;
+            case NET_STATUS_TCP_EINPROGRESS_ERROR:
+                return net_status_tcp_econnrefused_error_str;
+            case NET_STATUS_TCP_ECONNREFUSED_ERROR:
+                return net_status_tcp_econnrefused_error_str;
+            case NET_STATUS_TCP_ERROR:
+                return net_status_tcp_error_str;
+            case NET_STATUS_SSL_CONTEXT_ERROR:
+                return net_status_ssl_context_error_str;
+            case NET_STATUS_SSL_SESSION_ERROR:
+                return net_status_ssl_session_error_str;
+            case NET_STATUS_SSL_CERT_ERROR:
+                return net_status_ssl_cert_error_str;
+            case NET_STATUS_SSL_INIT_ERROR:
+                return net_status_ssl_init_error_str;
+        }
+    }
+
     /*
      * Cleanup netsocket structure.
      */
     static netsocket
-    resumenetsocket(netsocket socket, int status) {
+    cancelnetsocket(netsocket socket, int status) {
         netsocket empty = {NULL, NULL, NULL, -1, status};
         if (socket.fd > 0) {
             close(socket.fd);
@@ -110,7 +142,7 @@ extern "C" {
      */
     void
     netclose(netsocket socket) {
-        resumenetsocket(socket, NET_STATUS_OK);
+        cancelnetsocket(socket, NET_STATUS_OK);
     }
 
     /*
@@ -250,12 +282,12 @@ extern "C" {
         netsocket net_socket = {NULL, NULL, NULL, -1, NET_STATUS_OK};
 
         if (netlookup(server, &ip) < 0) {
-            return resumenetsocket(net_socket, NET_STATUS_RESOLV_ERROR);
+            return cancelnetsocket(net_socket, NET_STATUS_RESOLV_ERROR);
         }
 
         proto = istcp ? SOCK_STREAM : SOCK_DGRAM;
         if ((fd = socket(AF_INET, proto, 0)) < 0) {
-            return resumenetsocket(net_socket, NET_STATUS_TCP_ERROR);
+            return cancelnetsocket(net_socket, NET_STATUS_TCP_ERROR);
         }
 
         /* for udp */
@@ -270,7 +302,7 @@ extern "C" {
         sa.sin_family = AF_INET;
         sa.sin_port = htons(port);
         if (connect(fd, (struct sockaddr*) &sa, sizeof sa) < 0 && errno != EINPROGRESS) {
-            return resumenetsocket(net_socket, NET_STATUS_TCP_EINPROGRESS_ERROR);
+            return cancelnetsocket(net_socket, NET_STATUS_TCP_EINPROGRESS_ERROR);
         }
 
         sn = sizeof sa;
@@ -287,7 +319,7 @@ extern "C" {
             n = ECONNREFUSED;
         close(fd);
         errno = n;
-        return resumenetsocket(net_socket, NET_STATUS_TCP_ECONNREFUSED_ERROR);
+        return cancelnetsocket(net_socket, NET_STATUS_TCP_ECONNREFUSED_ERROR);
     }
 
     netsocket
@@ -314,7 +346,7 @@ extern "C" {
          * initialize SSL library and register algorithms             *
          * ---------------------------------------------------------- */
         if (SSL_library_init() < 0) {
-            return resumenetsocket(socket, NET_STATUS_SSL_INIT_ERROR);
+            return cancelnetsocket(socket, NET_STATUS_SSL_INIT_ERROR);
         }
 
         /* ---------------------------------------------------------- *
@@ -326,7 +358,7 @@ extern "C" {
          * Try to create a new SSL context                            *
          * ---------------------------------------------------------- */
         if ((socket.ctx = SSL_CTX_new(method)) == NULL) {
-            return resumenetsocket(socket, NET_STATUS_SSL_CONTEXT_ERROR);
+            return cancelnetsocket(socket, NET_STATUS_SSL_CONTEXT_ERROR);
         }
 
         /* ---------------------------------------------------------- *
@@ -346,7 +378,7 @@ extern "C" {
         socket.fd = tcpsocket.fd;
 
         if (socket.fd < 0) {
-            return resumenetsocket(socket, tcpsocket.status);
+            return cancelnetsocket(socket, tcpsocket.status);
         }
 
         /* ---------------------------------------------------------- *
@@ -358,7 +390,7 @@ extern "C" {
          * Try to SSL-connect here, returns 1 for success             *
          * ---------------------------------------------------------- */
         if (SSL_connect(socket.ssl) != 1) {
-            return resumenetsocket(socket, NET_STATUS_SSL_SESSION_ERROR);
+            return cancelnetsocket(socket, NET_STATUS_SSL_SESSION_ERROR);
         }
 
         /* ---------------------------------------------------------- *
@@ -366,7 +398,7 @@ extern "C" {
          * ---------------------------------------------------------- */
         socket.cert = SSL_get_peer_certificate(socket.ssl);
         if (socket.cert == NULL) {
-            return resumenetsocket(socket, NET_STATUS_SSL_CERT_ERROR);
+            return cancelnetsocket(socket, NET_STATUS_SSL_CERT_ERROR);
         }
 
         return socket;
