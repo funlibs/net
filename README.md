@@ -12,6 +12,8 @@ HTTP Get request on a webserver 443 port:
 #include <stdio.h>
 
 #define MAX_REPLY 1000
+#define MAX_PAYLOAD 1000
+
 
 int
 main(int argc, char** argv) {
@@ -20,14 +22,14 @@ main(int argc, char** argv) {
     int count;
     char* request = "GET / HTTP/1.0\r\nHost: www.google.fr\r\n\r\n";
     char reply[MAX_REPLY + 1];
-    char payload[MAX_REPLY];
+    char payload[MAX_PAYLOAD + 1];
 
     socket = netdial(NET_SSL, "www.google.fr", 443);
     if (socket.fd < 0)
         return 1;
 
     if (netwrite(socket, request, strlen(request)) >= 0)
-        while ((count = netread(socket, payload, MAX_REPLY)) > 0)
+        while ((count = netread(socket, payload, MAX_PAYLOAD)) > 0)
             printf("%s", payload);
 
 
