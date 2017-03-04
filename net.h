@@ -33,6 +33,9 @@
 #include <string.h>
 #include <resolv.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+
 
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
@@ -48,40 +51,16 @@
 extern "C" {
 #endif //__cplusplus
 
-    enum {
-        NET_TYPE_HOST,
-        NET_TYPE_PORT,
-        NET_TYPE_LOCATION,
-        NET_TYPE_FORM
-    };
-
-    enum {
+    typedef enum {
         NET_UDP,
         NET_TCP,
         NET_SSL
-    };
+    } NetType;
 
-    enum {
-        NET_STATUS_OK,
-        NET_STATUS_RESOLV_ERROR,
-        NET_STATUS_TCP_EINPROGRESS_ERROR,
-        NET_STATUS_TCP_ECONNREFUSED_ERROR,
-        NET_STATUS_TCP_ERROR,
-        NET_STATUS_SSL_CONTEXT_ERROR,
-        NET_STATUS_SSL_SESSION_ERROR,
-        NET_STATUS_SSL_CERT_ERROR,
-        NET_STATUS_SSL_INIT_ERROR
-    };
-
-    char* net_status_ok_str = "ok";
-    char* net_status_resolv_error_str = "Can not resolve the hostname";
-    char* net_status_tcp_einprogress_error_str = "TCP can not complete connexion";
-    char* net_status_tcp_econnrefused_error_str = "TCP connexion refused";
-    char* net_status_tcp_error_str = "TCP error";
-    char* net_status_ssl_context_error_str = "SSL context error";
-    char* net_status_ssl_session_error_str = "SSL session error";
-    char* net_status_ssl_cert_error_str = "SSL certificate error";
-    char* net_status_ssl_init_error_str = "SSL init error";
+    typedef enum {
+        NET_SYNC,
+        NET_ASYNC
+    } NetSync;
 
     typedef struct {
         X509 *cert;
@@ -89,38 +68,58 @@ extern "C" {
         SSL *ssl;
         int fd;
         int status;
-    } netsocket;
+    } NetSocket;
+
+    char ssl_error_none[] = "none";
+    char ssl_error_zero_return[] = "The TLS/SSL connection has been closed";
+    char ssl_error_want_write[] = "The Write operation did not complete";
+    char ssl_error_want_read[] = "The Read operation did not complete";
+
+    char ssl_error_want_connect[] = "The Connect opertation did not complete";
+    char ssl_error_want_accept[] = "The Accept opertation did not complete";
+    char ssl_error_want_x509_lookup[] = "The x509 lookup did not complete";
+    char ssl_error_ssl[] = "A failure in the SSL library occurred (protocol error?)";
 
     char*
-    getnetstatus(int status) {
-        switch (status) {
-            case NET_STATUS_OK:
-                return net_status_ok_str;
-            case NET_STATUS_RESOLV_ERROR:
-                return net_status_resolv_error_str;
-            case NET_STATUS_TCP_EINPROGRESS_ERROR:
-                return net_status_tcp_econnrefused_error_str;
-            case NET_STATUS_TCP_ECONNREFUSED_ERROR:
-                return net_status_tcp_econnrefused_error_str;
-            case NET_STATUS_TCP_ERROR:
-                return net_status_tcp_error_str;
-            case NET_STATUS_SSL_CONTEXT_ERROR:
-                return net_status_ssl_context_error_str;
-            case NET_STATUS_SSL_SESSION_ERROR:
-                return net_status_ssl_session_error_str;
-            case NET_STATUS_SSL_CERT_ERROR:
-                return net_status_ssl_cert_error_str;
-            case NET_STATUS_SSL_INIT_ERROR:
-                return net_status_ssl_init_error_str;
+    netGetStatus(NetSocket net_socket) {
+        if (net_socket.status < 9) {
+            switch (net_socket.status) {
+                case SSL_ERROR_NONE:
+                    return ssl_error_none;
+                    break;
+                case SSL_ERROR_ZERO_RETURN:
+                    return ssl_error_zero_return;
+                    break;
+                case SSL_ERROR_WANT_READ:
+                    return ssl_error_want_read;
+                    break;
+                case SSL_ERROR_WANT_WRITE:
+                    return ssl_error_want_write;
+                    break;
+                case SSL_ERROR_WANT_ACCEPT:
+                    return ssl_error_want_accept;
+                    break;
+                case SSL_ERROR_WANT_CONNECT:
+                    return ssl_error_want_connect;
+                    break;
+                case SSL_ERROR_WANT_X509_LOOKUP:
+                    return ssl_error_want_x509_lookup;
+                    break;
+                case SSL_ERROR_SSL:
+                    return ssl_error_ssl;
+                    break;
+            }
+        } else {
+            return strerror(net_socket.status);
         }
     }
 
     /*
      * Cleanup netsocket structure.
      */
-    static netsocket
-    cancelnetsocket(netsocket socket, int status) {
-        netsocket empty = {NULL, NULL, NULL, -1, status};
+    NetSocket
+    netClose(NetSocket socket) {
+        NetSocket empty = {NULL, NULL, NULL, -1, errno};
         if (socket.fd > 0) {
             close(socket.fd);
         }
@@ -138,18 +137,10 @@ extern "C" {
     }
 
     /*
-     * Cleanup netsocket structure.
-     */
-    void
-    netclose(netsocket socket) {
-        cancelnetsocket(socket, NET_STATUS_OK);
-    }
-
-    /*
      * TODO serious url parser
      */
     void
-    parseurl(char url_str[]) {
+    __parseUrl(char url_str[]) {
         char hostname[256] = "";
         char portnum[6] = "443";
         char proto[6] = "";
@@ -186,8 +177,8 @@ extern "C" {
 
     }
 
-    static int
-    parseip(char *name, uint32_t *ip) {
+    int
+    __parseIP(char *name, uint32_t *ip) {
         unsigned char addr[4];
         char *p;
         int i, x;
@@ -231,10 +222,10 @@ extern "C" {
     }
 
     int
-    netlookup(char *name, uint32_t *ip) {
+    __hostLookup(char *name, uint32_t *ip) {
         struct hostent *he;
 
-        if (parseip(name, ip) >= 0)
+        if (__parseIP(name, ip) >= 0)
             return 0;
 
         if ((he = gethostbyname(name)) != 0) {
@@ -249,8 +240,8 @@ extern "C" {
      * Write to a socket, either SSL or pure TCP.
      */
     int
-    netwrite(netsocket socket, char* payload, int size) {
-
+    netWrite(NetSocket socket, char* payload, int size) {
+        int c;
         if (socket.ssl != NULL) {
             return SSL_write(socket.ssl, payload, size);
         } else {
@@ -263,7 +254,7 @@ extern "C" {
      * Read from SSL/TCP socket.
      */
     int
-    netread(netsocket socket, char* payload, int size) {
+    netRead(NetSocket socket, char* payload, int size) {
 
         if (socket.ssl != NULL) {
             return SSL_read(socket.ssl, payload, size);
@@ -273,61 +264,63 @@ extern "C" {
 
     }
 
-    netsocket
-    netdialtcp(int istcp, char *server, int port) {
-        int proto, fd, n;
+    NetSocket
+    netDialTCP(NetType istcp, char *server, int port, NetSync sync) {
+        int proto, n;
         uint32_t ip;
         struct sockaddr_in sa;
         socklen_t sn;
-        netsocket net_socket = {NULL, NULL, NULL, -1, NET_STATUS_OK};
+        NetSocket net_socket = {NULL, NULL, NULL, -1, 0};
 
-        if (netlookup(server, &ip) < 0) {
-            return cancelnetsocket(net_socket, NET_STATUS_RESOLV_ERROR);
+        if (__hostLookup(server, &ip) < 0) {
+            return netClose(net_socket);
         }
 
         proto = istcp ? SOCK_STREAM : SOCK_DGRAM;
-        if ((fd = socket(AF_INET, proto, 0)) < 0) {
-            return cancelnetsocket(net_socket, NET_STATUS_TCP_ERROR);
+        if ((net_socket.fd = socket(AF_INET, proto, 0)) < 0) {
+            return netClose(net_socket);
         }
 
         /* for udp */
         if (!istcp) {
             n = 1;
-            setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &n, sizeof n);
+            setsockopt(net_socket.fd, SOL_SOCKET, SO_BROADCAST, &n, sizeof n);
         }
+
+        /* maybe async */
+        if (sync == NET_ASYNC)
+            if ((fcntl(net_socket.fd, F_SETFL, fcntl(net_socket.fd, F_GETFL) | O_NONBLOCK)) < 0)
+                return netClose(net_socket);
+
 
         /* start connecting */
         memset(&sa, 0, sizeof sa);
         memmove(&sa.sin_addr, &ip, 4);
         sa.sin_family = AF_INET;
         sa.sin_port = htons(port);
-        if (connect(fd, (struct sockaddr*) &sa, sizeof sa) < 0 && errno != EINPROGRESS) {
-            return cancelnetsocket(net_socket, NET_STATUS_TCP_EINPROGRESS_ERROR);
-        }
+        if (connect(net_socket.fd, (struct sockaddr*) &sa, sizeof sa) < 0 && errno != EINPROGRESS)
+            return netClose(net_socket);
 
         sn = sizeof sa;
-        if (getpeername(fd, (struct sockaddr*) &sa, &sn) >= 0) {
-            net_socket.fd = fd;
-            // ok
+        if (getpeername(net_socket.fd, (struct sockaddr*) &sa, &sn) >= 0)
             return net_socket;
-        }
 
         /* report error */
         sn = sizeof n;
-        getsockopt(fd, SOL_SOCKET, SO_ERROR, (void*) &n, &sn);
+        getsockopt(net_socket.fd, SOL_SOCKET, SO_ERROR, (void*) &n, &sn);
         if (n == 0)
             n = ECONNREFUSED;
-        close(fd);
         errno = n;
-        return cancelnetsocket(net_socket, NET_STATUS_TCP_ECONNREFUSED_ERROR);
+        return netClose(net_socket);
     }
 
-    netsocket
-    netdialssl(char *server, int port) {
+    NetSocket
+    netDialSSL(char *server, int port, NetSync sync) {
 
+        int err, err2;
         BIO *certbio = NULL;
         const SSL_METHOD *method;
-        netsocket socket = {NULL, NULL, NULL, -1}, tcpsocket;
+        NetSocket socket = {NULL, NULL, NULL, -1}, tcpsocket;
 
         /* ---------------------------------------------------------- *
          * These function calls initialize openssl for correct work.  *
@@ -346,7 +339,7 @@ extern "C" {
          * initialize SSL library and register algorithms             *
          * ---------------------------------------------------------- */
         if (SSL_library_init() < 0) {
-            return cancelnetsocket(socket, NET_STATUS_SSL_INIT_ERROR);
+            return netClose(socket);
         }
 
         /* ---------------------------------------------------------- *
@@ -358,7 +351,7 @@ extern "C" {
          * Try to create a new SSL context                            *
          * ---------------------------------------------------------- */
         if ((socket.ctx = SSL_CTX_new(method)) == NULL) {
-            return cancelnetsocket(socket, NET_STATUS_SSL_CONTEXT_ERROR);
+            return netClose(socket);
         }
 
         /* ---------------------------------------------------------- *
@@ -374,12 +367,11 @@ extern "C" {
         /* ---------------------------------------------------------- *
          * Make the underlying TCP socket connection                  *
          * ---------------------------------------------------------- */
-        tcpsocket = netdialtcp(NET_TCP, server, port);
+        tcpsocket = netDialTCP(NET_TCP, server, port, sync);
         socket.fd = tcpsocket.fd;
 
-        if (socket.fd < 0) {
-            return cancelnetsocket(socket, tcpsocket.status);
-        }
+        if (socket.fd < 0)
+            return netClose(socket);
 
         /* ---------------------------------------------------------- *
          * Attach the SSL session to the socket descriptor            *
@@ -389,27 +381,93 @@ extern "C" {
         /* ---------------------------------------------------------- *
          * Try to SSL-connect here, returns 1 for success             *
          * ---------------------------------------------------------- */
-        if (SSL_connect(socket.ssl) != 1) {
-            return cancelnetsocket(socket, NET_STATUS_SSL_SESSION_ERROR);
+        if ((err = SSL_connect(socket.ssl)) != 1) {
+            if ((err2 = SSL_get_error(socket.ssl, err)) != SSL_ERROR_SYSCALL)
+                errno = err2;
+
+            return netClose(socket);
         }
 
         /* ---------------------------------------------------------- *
          * Get the remote certificate into the X509 structure         *
          * ---------------------------------------------------------- */
-        socket.cert = SSL_get_peer_certificate(socket.ssl);
-        if (socket.cert == NULL) {
-            return cancelnetsocket(socket, NET_STATUS_SSL_CERT_ERROR);
-        }
+        if ((socket.cert = SSL_get_peer_certificate(socket.ssl)) == NULL)
+            return netClose(socket);
 
         return socket;
     }
 
-    netsocket
-    netdial(int socktype, char *server, int port) {
-        if (socktype == NET_SSL) {
-            return netdialssl(server, port);
+    NetSocket
+    netAnnounce(NetType istcp, char *server, int port, NetSync sync) {
+        int n, proto;
+        struct sockaddr_in sa;
+        socklen_t sn;
+        uint32_t ip;
+        NetSocket netsocket = {NULL, NULL, NULL, -1};
+
+        if (istcp == NET_UDP) {
+            proto = SOCK_DGRAM;
         } else {
-            return netdialtcp(socktype, server, port);
+            proto = SOCK_STREAM;
+        }
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        if (server != ((void*) 0) && strcmp(server, "*") != 0) {
+            if (__hostLookup(server, &ip) < 0)
+                return netsocket;
+            memmove(&sa.sin_addr, &ip, 4);
+        }
+        sa.sin_port = htons(port);
+        if ((netsocket.fd = socket(AF_INET, proto, 0)) < 0) {
+            return netClose(netsocket);
+        }
+
+        /* set reuse flag for tcp */
+        if (istcp && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE, (void*) &n, &sn) >= 0) {
+            n = 1;
+            setsockopt(netsocket.fd, SOL_SOCKET, SO_REUSEADDR, (char*) &n, sizeof n);
+        }
+
+        if (bind(netsocket.fd, (struct sockaddr*) &sa, sizeof sa) < 0) {
+            return netClose(netsocket);
+        }
+
+        if (proto == SOCK_STREAM)
+            listen(netsocket.fd, 16);
+
+        if (sync == NET_ASYNC)
+            if ((fcntl(netsocket.fd, F_SETFL, fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
+                return netClose(netsocket);
+
+        return netsocket;
+    }
+
+    NetSocket
+    netDial(NetType socktype, char *server, int port) {
+        if (socktype == NET_SSL) {
+            return netDialSSL(server, port, NET_SYNC);
+        } else {
+            return netDialTCP(socktype, server, port, NET_SYNC);
+        }
+    }
+
+    /*
+     * Next calls to connect, netRead and readWrite will return immediately if
+     * fd is not ready for various reason (asynchrnous):
+     * - return -1, with errno = EINPROGRESS for connect
+     * - return -1, with errno = EAGAIN for netRead/netWrite,
+     *
+     * It is the role of the user to handle this behaviour.
+     *
+     * If you do not understand, use netDial.
+     * This will presently fail for ssl connections.
+     */
+    NetSocket
+    netAsyncDial(NetType socktype, char *server, int port) {
+        if (socktype == NET_SSL) {
+            return netDialSSL(server, port, NET_ASYNC);
+        } else {
+            return netDialTCP(socktype, server, port, NET_ASYNC);
         }
     }
 

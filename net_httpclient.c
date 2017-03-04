@@ -11,6 +11,7 @@
 #include <string.h>
 #include <net.h>
 
+
 char HTTP_GET[] =
         "GET / HTTP/1.0\r\n"
         "Host: %s\r\n\r\n";
@@ -28,7 +29,7 @@ int
 main(int argc, char** argv) {
     int count, net_type, port;
     char payload[PAYLOAD_MAX + 1], request[REQUEST_MAX + 1];
-    netsocket socket;
+    NetSocket socket;
 
     if (argc < 3) {
         printf("no enought args");
@@ -42,21 +43,21 @@ main(int argc, char** argv) {
         net_type = NET_SSL;
     }
 
-    socket = netdial(net_type, argv[2], port);
+    socket = netDial(net_type, argv[2], port);
 
     if (socket.fd < 0) {
-        printf("ERROR: %s\n", getnetstatus(socket.status));
+        printf("ERROR: %s\n", netGetStatus(socket));
         return (EXIT_FAILURE);
     }
 
     snprintf(request, REQUEST_MAX, HTTP_GET, argv[2]);
-    if (netwrite(socket, request, strlen(request)) >= 0) {
-        while ((count = netread(socket, payload, PAYLOAD_MAX)) > 0) {
+    if (netWrite(socket, request, strlen(request)) >= 0) {
+        while ((count = netRead(socket, payload, PAYLOAD_MAX)) > 0) {
             printf("%s", payload);
         }
     }
 
-    netclose(socket);
+    netClose(socket);
 
     return (EXIT_SUCCESS);
 }
