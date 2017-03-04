@@ -78,7 +78,8 @@ extern "C" {
     char ssl_error_want_connect[] = "The Connect opertation did not complete";
     char ssl_error_want_accept[] = "The Accept opertation did not complete";
     char ssl_error_want_x509_lookup[] = "The x509 lookup did not complete";
-    char ssl_error_ssl[] = "A failure in the SSL library occurred (protocol error?)";
+    char ssl_error_ssl[] =
+            "A failure in the SSL library occurred (protocol error?)";
 
     char*
     netGetStatus(NetSocket net_socket) {
@@ -289,7 +290,8 @@ extern "C" {
 
         /* maybe async */
         if (sync == NET_ASYNC)
-            if ((fcntl(net_socket.fd, F_SETFL, fcntl(net_socket.fd, F_GETFL) | O_NONBLOCK)) < 0)
+            if ((fcntl(net_socket.fd, F_SETFL,
+                    fcntl(net_socket.fd, F_GETFL) | O_NONBLOCK)) < 0)
                 return netClose(net_socket);
 
 
@@ -298,7 +300,8 @@ extern "C" {
         memmove(&sa.sin_addr, &ip, 4);
         sa.sin_family = AF_INET;
         sa.sin_port = htons(port);
-        if (connect(net_socket.fd, (struct sockaddr*) &sa, sizeof sa) < 0 && errno != EINPROGRESS)
+        if (connect(net_socket.fd, (struct sockaddr*) &sa, sizeof sa) < 0
+                && errno != EINPROGRESS)
             return netClose(net_socket);
 
         sn = sizeof sa;
@@ -397,6 +400,28 @@ extern "C" {
         return socket;
     }
 
+    int
+    netAccept(NetSocket net_socket, char *server, int *port) {
+        int cfd, one, fd;
+        struct sockaddr_in sa;
+        unsigned char *ip;
+        socklen_t len;
+        fd = net_socket.fd;
+
+        len = sizeof sa;
+        if ((cfd = accept(fd, (void*) &sa, &len)) < 0) {
+            return -1;
+        }
+        if (server) {
+            ip = (unsigned char *) & sa.sin_addr;
+        }
+        if (port)
+            *port = ntohs(sa.sin_port);
+        one = 1;
+        setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, (char*) &one, sizeof one);
+        return cfd;
+    }
+
     NetSocket
     netAnnounce(NetType istcp, char *server, int port, NetSync sync) {
         int n, proto;
@@ -423,9 +448,11 @@ extern "C" {
         }
 
         /* set reuse flag for tcp */
-        if (istcp && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE, (void*) &n, &sn) >= 0) {
+        if (istcp && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE,
+                (void*) &n, &sn) >= 0) {
             n = 1;
-            setsockopt(netsocket.fd, SOL_SOCKET, SO_REUSEADDR, (char*) &n, sizeof n);
+            setsockopt(netsocket.fd, SOL_SOCKET,
+                    SO_REUSEADDR, (char*) &n, sizeof n);
         }
 
         if (bind(netsocket.fd, (struct sockaddr*) &sa, sizeof sa) < 0) {
@@ -436,7 +463,8 @@ extern "C" {
             listen(netsocket.fd, 16);
 
         if (sync == NET_ASYNC)
-            if ((fcntl(netsocket.fd, F_SETFL, fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
+            if ((fcntl(netsocket.fd, F_SETFL,
+                    fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
                 return netClose(netsocket);
 
         return netsocket;
