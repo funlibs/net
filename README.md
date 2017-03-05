@@ -27,7 +27,7 @@ main(int argc, char** argv) {
         return 1;
 
     if (netWrite(socket, request, strlen(request)) >= 0)
-        while ((count = netRead(socket, reply, MAX_PAYLOAD)) > 0)
+        while ((count = netRead(socket, reply, MAX_REPLY)) > 0)
             printf("%s", reply);
 
     netClose(socket);
@@ -39,5 +39,3 @@ main(int argc, char** argv) {
 ```sh
 gcc exemple.c -L/usr/lib -lssl -lcrypto -o exemple
 ```
-
-See *net_httpclient.c* for a complete exemple.
