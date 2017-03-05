@@ -31,10 +31,11 @@
 #include <netinet/tcp.h>
 #include <errno.h>
 #include <string.h>
-#include <resolv.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <stdint.h>
 
 
 #include <openssl/bio.h>
@@ -110,9 +111,9 @@ extern "C" {
                     return ssl_error_ssl;
                     break;
             }
-        } else {
-            return strerror(net_socket.status);
         }
+
+        return strerror(net_socket.status);
     }
 
     /*
@@ -230,7 +231,7 @@ extern "C" {
             return 0;
 
         if ((he = gethostbyname(name)) != 0) {
-            *ip = *(uint32_t*) he->h_addr;
+            *ip = *(uint32_t*) he->h_addr_list[0];
             return 0;
         }
 
