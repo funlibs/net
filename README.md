@@ -20,17 +20,17 @@ main(int argc, char** argv) {
     int count;
     char* request = "GET / HTTP/1.0\r\nHost: www.google.fr\r\n\r\n";
     char reply[MAX_REPLY + 1];
-    netsocket socket;
+    NetSocket socket;
 
-    socket = netdial(NET_SSL, "www.google.fr", 443);
+    socket = netDial(NET_SSL, "www.google.fr", 443);
     if (socket.fd < 0)
         return 1;
 
-    if (netwrite(socket, request, strlen(request)) >= 0)
-        while ((count = netread(socket, reply, MAX_PAYLOAD)) > 0)
+    if (netWrite(socket, request, strlen(request)) >= 0)
+        while ((count = netRead(socket, reply, MAX_PAYLOAD)) > 0)
             printf("%s", reply);
 
-    netclose(socket);
+    netClose(socket);
 
     return 0;
 }
