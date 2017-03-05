@@ -401,26 +401,29 @@ extern "C" {
         return socket;
     }
 
-    int
-    netAccept(NetSocket net_socket, char *server, int *port) {
-        int cfd, one, fd;
+    NetSocket
+    netAccept(NetSocket net_socket) {
+        int cfd, one, fd, port;
         struct sockaddr_in sa;
         unsigned char *ip;
+        char remote[100];
         socklen_t len;
         fd = net_socket.fd;
+        NetSocket rsocket = {NULL, NULL, NULL, -1, 0};
 
         len = sizeof sa;
         if ((cfd = accept(fd, (void*) &sa, &len)) < 0) {
-            return -1;
+            return netClose(rsocket);
         }
-        if (server) {
-            ip = (unsigned char *) & sa.sin_addr;
-        }
-        if (port)
-            *port = ntohs(sa.sin_port);
+
+        ip = (unsigned char *) & sa.sin_addr;
+        port = ntohs(sa.sin_port);
+        // printf("connexion from %s port %i", ip, port);
+
         one = 1;
         setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, (char*) &one, sizeof one);
-        return cfd;
+        rsocket.fd = cfd;
+        return rsocket;
     }
 
     NetSocket
