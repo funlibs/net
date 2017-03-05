@@ -20,12 +20,26 @@ add_executable(blocking_tcp_server
 add_executable(blocking_tcp_client
     test/blocking_tcp_client.c
     net.h)
+add_executable(async_tcp_server
+    test/async_tcp_server.c
+    net.h)
+add_executable(async_tcp_client
+    test/async_tcp_client.c
+    net.h)
+
 target_link_libraries(net_httpclient ${OPENSSL_LIBRARIES})
 target_link_libraries(blocking_tcp_server ${OPENSSL_LIBRARIES})
 target_link_libraries(blocking_tcp_client ${OPENSSL_LIBRARIES})
 
+target_link_libraries(async_tcp_server ${OPENSSL_LIBRARIES})
+target_link_libraries(async_tcp_client ${OPENSSL_LIBRARIES})
+
 enable_testing()
 add_test(
-  NAME BLOCKING_TEST
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_blocking_tests.sh
-  WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    NAME BLOCKING_TEST
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_blocking_tests.sh
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(
+    NAME ASYNC_TEST
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_async_tests.sh
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
