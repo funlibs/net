@@ -22,7 +22,7 @@ main(int argc, char** argv) {
     char reply[MAX_REPLY + 1];
     NetSocket socket;
 
-    socket = netDial(NET_SSL, "www.google.fr", 443);
+    socket = netDial("www.google.fr", 443, NET_TCP | NET_SSL | NET_SYNC);
     if (socket.fd < 0)
         return 1;
 
