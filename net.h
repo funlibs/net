@@ -25,7 +25,14 @@
 
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/poll.h>
+
+#ifdef __linux__
+#include <sys/epoll.h>
+#else
+#include <sys/time.h>
+#include <sys/event.h>
+#endif
+
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
