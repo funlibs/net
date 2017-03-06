@@ -75,6 +75,7 @@ extern "C" {
         SSL *ssl;
         int fd;
         int status;
+        int epoll_fd;
     } NetSocket;
 
     NetSocket netDial(char *server, int port, int opts);
@@ -82,7 +83,7 @@ extern "C" {
     int netRead(NetSocket socket, char* payload, int size);
     NetSocket netClose(NetSocket);
     NetSocket netAnnounce(char *server, int port, int opts);
-    NetSocket netAccept(NetSocket net_socket);
+    NetSocket netAccept(NetSocket net_socket, int opts);
 
     char * netGetStatus(NetSocket socket);
     void __parseUrl(char url[]);
@@ -144,6 +145,12 @@ extern "C" {
 
     }
 
+    NetSocket
+    netEmptySocket() {
+        NetSocket s = {NULL, NULL, NULL, -1, 0, 0};
+        return s;
+    }
+
     /*
      * Read from SSL/TCP socket.
      */
@@ -163,7 +170,7 @@ extern "C" {
      */
     NetSocket
     netClose(NetSocket socket) {
-        NetSocket empty = {NULL, NULL, NULL, -1, errno};
+        NetSocket empty = netEmptySocket();
         if (socket.fd > 0) {
             close(socket.fd);
         }
@@ -194,7 +201,7 @@ extern "C" {
         struct sockaddr_in sa;
         socklen_t sn;
         uint32_t ip;
-        NetSocket netsocket = {NULL, NULL, NULL, -1};
+        NetSocket netsocket = netEmptySocket();
 
         if (__USE_UDP(opts)) {
             proto = SOCK_DGRAM;
@@ -228,23 +235,25 @@ extern "C" {
         if (proto == SOCK_STREAM)
             listen(netsocket.fd, 16);
 
-        if (__USE_ASYNC(opts))
+        if (__USE_ASYNC(opts)) {
             if ((fcntl(netsocket.fd, F_SETFL,
-                    fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
+                    fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0) {
                 return netClose(netsocket);
+            }
+        }
 
         return netsocket;
     }
 
     NetSocket
-    netAccept(NetSocket net_socket) {
+    netAccept(NetSocket net_socket, int opts) {
         int cfd, one, fd, port;
         struct sockaddr_in sa;
         unsigned char *ip;
         char remote[100];
         socklen_t len;
         fd = net_socket.fd;
-        NetSocket rsocket = {NULL, NULL, NULL, -1, 0};
+        NetSocket rsocket = netEmptySocket();
 
         len = sizeof sa;
         if ((cfd = accept(fd, (void*) &sa, &len)) < 0) {
@@ -258,6 +267,13 @@ extern "C" {
         one = 1;
         setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, (char*) &one, sizeof one);
         rsocket.fd = cfd;
+
+        if (__USE_ASYNC(opts)) {
+            if ((fcntl(rsocket.fd, F_SETFL,
+                    fcntl(rsocket.fd, F_GETFL) | O_NONBLOCK)) < 0) {
+                return netClose(rsocket);
+            }
+        }
         return rsocket;
     }
 
@@ -409,7 +425,7 @@ extern "C" {
         uint32_t ip;
         struct sockaddr_in sa;
         socklen_t sn;
-        NetSocket net_socket = {NULL, NULL, NULL, -1, 0};
+        NetSocket net_socket = netEmptySocket();
 
         if (__hostLookup(server, &ip) < 0) {
             return netClose(net_socket);
@@ -466,7 +482,8 @@ extern "C" {
         int err, err2;
         BIO *certbio = NULL;
         const SSL_METHOD *method;
-        NetSocket socket = {NULL, NULL, NULL, -1}, tcpsocket;
+        NetSocket socket = netEmptySocket();
+        NetSocket tcpsocket = netEmptySocket();
 
         /* ---------------------------------------------------------- *
          * These function calls initialize openssl for correct work.  *

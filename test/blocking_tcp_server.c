@@ -9,7 +9,7 @@ int main(int argc, char** argv) {
     NetSocket listen, rsocket;
     listen = netAnnounce(0, 8889, NET_TCP | NET_SYNC);
 
-    rsocket = netAccept(listen);
+    rsocket = netAccept(listen, NET_SYNC);
     if (rsocket.fd < 0) {
         printf("SERVER: Failed to open socket %s\n", netGetStatus(rsocket));
         return 1;
