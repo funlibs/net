@@ -70,6 +70,20 @@ extern "C" {
         int status;
     } NetSocket;
 
+    NetSocket netDial(char *server, int port, int opts);
+    int netWrite(NetSocket socket, char* payload, int size);
+    int netRead(NetSocket socket, char* payload, int size);
+    NetSocket netClose(NetSocket);
+    NetSocket netAnnounce(char *server, int port, int opts);
+    NetSocket netAccept(NetSocket net_socket);
+
+    char * netGetStatus(NetSocket socket);
+    void __parseUrl(char url[]);
+    int __parseIP(char *name, uint32_t *ip);
+    int __hostLookup(char *name, uint32_t *ip);
+    NetSocket __netDialSSL(char *server, int port, int opts);
+    NetSocket __netDialTCP(char *server, int port, int opts);
+
     char ssl_error_none[] = "none";
     char ssl_error_zero_return[] = "The TLS/SSL connection has been closed";
     char ssl_error_want_write[] = "The Write operation did not complete";
@@ -80,6 +94,165 @@ extern "C" {
     char ssl_error_want_x509_lookup[] = "The x509 lookup did not complete";
     char ssl_error_ssl[] =
             "A failure in the SSL library occurred (protocol error?)";
+
+    /*
+     * Opts can be:
+     * - NET_TCP/NET_UDP
+     * - NET_SYNC/NET_ASYNC
+     * - NET_NOSSL/NET_SSL
+     *
+     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
+     *
+     * IF NET_ASYNC:
+     * Next calls to connect, netRead and readWrite will return immediately if
+     * fd is not ready for various reason (asynchrnous):
+     * - return -1, with errno = EINPROGRESS for connect
+     * - return -1, with errno = EAGAIN for netRead/netWrite,
+     *
+     * It is the role of the user to handle this behaviour.
+     *
+     * If you do not understand, use netDial.
+     * This will presently fail for ssl connections.
+     */
+    NetSocket
+    netDial(char *server, int port, int opts) {
+        if (__USE_SSL(opts)) {
+            return __netDialTCP(server, port, opts);
+        } else {
+            return __netDialSSL(server, port, opts);
+        }
+    }
+
+    /*
+     * Write to a socket
+     */
+    int
+    netWrite(NetSocket socket, char* payload, int size) {
+        int c;
+        if (socket.ssl != NULL) {
+            return SSL_write(socket.ssl, payload, size);
+        } else {
+            return write(socket.fd, payload, size);
+        }
+
+    }
+
+    /*
+     * Read from SSL/TCP socket.
+     */
+    int
+    netRead(NetSocket socket, char* payload, int size) {
+
+        if (socket.ssl != NULL) {
+            return SSL_read(socket.ssl, payload, size);
+        } else {
+            return read(socket.fd, payload, size);
+        }
+
+    }
+
+    /*
+     * Close/Cleanup netsocket structure.
+     */
+    NetSocket
+    netClose(NetSocket socket) {
+        NetSocket empty = {NULL, NULL, NULL, -1, errno};
+        if (socket.fd > 0) {
+            close(socket.fd);
+        }
+        if (socket.ssl != NULL) {
+            SSL_free(socket.ssl);
+        }
+        if (socket.cert != NULL) {
+            X509_free(socket.cert);
+        }
+        if (socket.ctx != NULL) {
+            SSL_CTX_free(socket.ctx);
+        }
+
+        return empty;
+    }
+
+    /*
+     * Opts can be:
+     * - NET_TCP/NET_UDP
+     * - NET_SYNC/NET_ASYNC
+     * - NET_NOSSL/NET_SSL
+     *
+     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
+     */
+    NetSocket
+    netAnnounce(char *server, int port, int opts) {
+        int n, proto;
+        struct sockaddr_in sa;
+        socklen_t sn;
+        uint32_t ip;
+        NetSocket netsocket = {NULL, NULL, NULL, -1};
+
+        if (__USE_UDP(opts)) {
+            proto = SOCK_DGRAM;
+        } else {
+            proto = SOCK_STREAM;
+        }
+        memset(&sa, 0, sizeof sa);
+        sa.sin_family = AF_INET;
+        if (server != ((void*) 0) && strcmp(server, "*") != 0) {
+            if (__hostLookup(server, &ip) < 0)
+                return netsocket;
+            memmove(&sa.sin_addr, &ip, 4);
+        }
+        sa.sin_port = htons(port);
+        if ((netsocket.fd = socket(AF_INET, proto, 0)) < 0) {
+            return netClose(netsocket);
+        }
+
+        /* set reuse flag for tcp */
+        if ((!__USE_UDP(opts)) && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE,
+                (void*) &n, &sn) >= 0) {
+            n = 1;
+            setsockopt(netsocket.fd, SOL_SOCKET,
+                    SO_REUSEADDR, (char*) &n, sizeof n);
+        }
+
+        if (bind(netsocket.fd, (struct sockaddr*) &sa, sizeof sa) < 0) {
+            return netClose(netsocket);
+        }
+
+        if (proto == SOCK_STREAM)
+            listen(netsocket.fd, 16);
+
+        if (__USE_ASYNC(opts))
+            if ((fcntl(netsocket.fd, F_SETFL,
+                    fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
+                return netClose(netsocket);
+
+        return netsocket;
+    }
+
+    NetSocket
+    netAccept(NetSocket net_socket) {
+        int cfd, one, fd, port;
+        struct sockaddr_in sa;
+        unsigned char *ip;
+        char remote[100];
+        socklen_t len;
+        fd = net_socket.fd;
+        NetSocket rsocket = {NULL, NULL, NULL, -1, 0};
+
+        len = sizeof sa;
+        if ((cfd = accept(fd, (void*) &sa, &len)) < 0) {
+            return netClose(rsocket);
+        }
+
+        ip = (unsigned char *) & sa.sin_addr;
+        port = ntohs(sa.sin_port);
+        // printf("connexion from %s port %i", ip, port);
+
+        one = 1;
+        setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, (char*) &one, sizeof one);
+        rsocket.fd = cfd;
+        return rsocket;
+    }
 
     char*
     netGetStatus(NetSocket net_socket) {
@@ -113,28 +286,6 @@ extern "C" {
         }
 
         return strerror(net_socket.status);
-    }
-
-    /*
-     * Cleanup netsocket structure.
-     */
-    NetSocket
-    netClose(NetSocket socket) {
-        NetSocket empty = {NULL, NULL, NULL, -1, errno};
-        if (socket.fd > 0) {
-            close(socket.fd);
-        }
-        if (socket.ssl != NULL) {
-            SSL_free(socket.ssl);
-        }
-        if (socket.cert != NULL) {
-            X509_free(socket.cert);
-        }
-        if (socket.ctx != NULL) {
-            SSL_CTX_free(socket.ctx);
-        }
-
-        return empty;
     }
 
     /*
@@ -235,34 +386,6 @@ extern "C" {
         }
 
         return -1;
-    }
-
-    /*
-     * Write to a socket, either SSL or pure TCP.
-     */
-    int
-    netWrite(NetSocket socket, char* payload, int size) {
-        int c;
-        if (socket.ssl != NULL) {
-            return SSL_write(socket.ssl, payload, size);
-        } else {
-            return write(socket.fd, payload, size);
-        }
-
-    }
-
-    /*
-     * Read from SSL/TCP socket.
-     */
-    int
-    netRead(NetSocket socket, char* payload, int size) {
-
-        if (socket.ssl != NULL) {
-            return SSL_read(socket.ssl, payload, size);
-        } else {
-            return read(socket.fd, payload, size);
-        }
-
     }
 
     /*
@@ -413,114 +536,6 @@ extern "C" {
         return socket;
     }
 
-    NetSocket
-    netAccept(NetSocket net_socket) {
-        int cfd, one, fd, port;
-        struct sockaddr_in sa;
-        unsigned char *ip;
-        char remote[100];
-        socklen_t len;
-        fd = net_socket.fd;
-        NetSocket rsocket = {NULL, NULL, NULL, -1, 0};
-
-        len = sizeof sa;
-        if ((cfd = accept(fd, (void*) &sa, &len)) < 0) {
-            return netClose(rsocket);
-        }
-
-        ip = (unsigned char *) & sa.sin_addr;
-        port = ntohs(sa.sin_port);
-        // printf("connexion from %s port %i", ip, port);
-
-        one = 1;
-        setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, (char*) &one, sizeof one);
-        rsocket.fd = cfd;
-        return rsocket;
-    }
-
-    /*
-     * Opts can be:
-     * - NET_TCP/NET_UDP
-     * - NET_SYNC/NET_ASYNC
-     * - NET_NOSSL/NET_SSL
-     *
-     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
-     */
-    NetSocket
-    netAnnounce(char *server, int port, int opts) {
-        int n, proto;
-        struct sockaddr_in sa;
-        socklen_t sn;
-        uint32_t ip;
-        NetSocket netsocket = {NULL, NULL, NULL, -1};
-
-        if (__USE_UDP(opts)) {
-            proto = SOCK_DGRAM;
-        } else {
-            proto = SOCK_STREAM;
-        }
-        memset(&sa, 0, sizeof sa);
-        sa.sin_family = AF_INET;
-        if (server != ((void*) 0) && strcmp(server, "*") != 0) {
-            if (__hostLookup(server, &ip) < 0)
-                return netsocket;
-            memmove(&sa.sin_addr, &ip, 4);
-        }
-        sa.sin_port = htons(port);
-        if ((netsocket.fd = socket(AF_INET, proto, 0)) < 0) {
-            return netClose(netsocket);
-        }
-
-        /* set reuse flag for tcp */
-        if ((!__USE_UDP(opts)) && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE,
-                (void*) &n, &sn) >= 0) {
-            n = 1;
-            setsockopt(netsocket.fd, SOL_SOCKET,
-                    SO_REUSEADDR, (char*) &n, sizeof n);
-        }
-
-        if (bind(netsocket.fd, (struct sockaddr*) &sa, sizeof sa) < 0) {
-            return netClose(netsocket);
-        }
-
-        if (proto == SOCK_STREAM)
-            listen(netsocket.fd, 16);
-
-        if (__USE_ASYNC(opts))
-            if ((fcntl(netsocket.fd, F_SETFL,
-                    fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
-                return netClose(netsocket);
-
-        return netsocket;
-    }
-
-    /*
-     * Opts can be:
-     * - NET_TCP/NET_UDP
-     * - NET_SYNC/NET_ASYNC
-     * - NET_NOSSL/NET_SSL
-     *
-     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
-     *
-     * IF NET_ASYNC:
-     * Next calls to connect, netRead and readWrite will return immediately if
-     * fd is not ready for various reason (asynchrnous):
-     * - return -1, with errno = EINPROGRESS for connect
-     * - return -1, with errno = EAGAIN for netRead/netWrite,
-     *
-     * It is the role of the user to handle this behaviour.
-     *
-     * If you do not understand, use netDial.
-     * This will presently fail for ssl connections.
-     */
-    NetSocket
-    netDial(char *server, int port, int opts) {
-        if (__USE_SSL(opts)) {
-            return __netDialTCP(server, port, opts);
-        } else {
-            return __netDialSSL(server, port, opts);
-        }
-    }
 
 
 #ifdef __cplusplus
