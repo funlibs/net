@@ -27,7 +27,7 @@ char HTTP_GET[] =
  */
 int
 main(int argc, char** argv) {
-    int count, net_type, port;
+    int count, port, opts;
     char payload[PAYLOAD_MAX + 1], request[REQUEST_MAX + 1];
     NetSocket socket;
 
@@ -37,13 +37,13 @@ main(int argc, char** argv) {
     }
 
     port = 80;
-    net_type = NET_TCP;
+    opts = NET_TCP;
     if (strcmp(argv[1], "ssl") == 0) {
         port = 443;
-        net_type = NET_SSL;
+        opts = NET_TCP | NET_SSL;
     }
 
-    socket = netDial(net_type, argv[2], port);
+    socket = netDial(argv[2], port, opts);
 
     if (socket.fd < 0) {
         printf("ERROR: %s\n", netGetStatus(socket));

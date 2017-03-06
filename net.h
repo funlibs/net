@@ -47,21 +47,20 @@
 
 #define CLASS(p) ((*(unsigned char*)(p))>>6)
 
+#define NET_TCP 0
+#define NET_UDP 1
+#define NET_SYNC 0
+#define NET_ASYNC 2
+#define NET_NOSSL 0
+#define NET_SSL 4
+#define __USE_ASYNC(opts) (opts & NET_ASYNC)
+#define __USE_UDP(opts)   (opts & NET_UDP)
+#define __USE_SSL(opts)   (opts & NET_SSL)
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif //__cplusplus
-
-    typedef enum {
-        NET_UDP,
-        NET_TCP,
-        NET_SSL
-    } NetType;
-
-    typedef enum {
-        NET_SYNC,
-        NET_ASYNC
-    } NetSync;
 
     typedef struct {
         X509 *cert;
@@ -266,8 +265,16 @@ extern "C" {
 
     }
 
+    /*
+     * Opts can be:
+     * - NET_TCP/NET_UDP
+     * - NET_SYNC/NET_ASYNC
+     * - NET_NOSSL/NET_SSL
+     *
+     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
+     */
     NetSocket
-    netDialTCP(NetType istcp, char *server, int port, NetSync sync) {
+    __netDialSSL(char *server, int port, int opts) {
         int proto, n;
         uint32_t ip;
         struct sockaddr_in sa;
@@ -278,19 +285,24 @@ extern "C" {
             return netClose(net_socket);
         }
 
-        proto = istcp ? SOCK_STREAM : SOCK_DGRAM;
+        if (__USE_UDP(opts)) {
+            proto = SOCK_DGRAM;
+        } else {
+            proto = SOCK_STREAM;
+        }
+
         if ((net_socket.fd = socket(AF_INET, proto, 0)) < 0) {
             return netClose(net_socket);
         }
 
         /* for udp */
-        if (!istcp) {
+        if (__USE_UDP(opts)) {
             n = 1;
             setsockopt(net_socket.fd, SOL_SOCKET, SO_BROADCAST, &n, sizeof n);
         }
 
         /* maybe async */
-        if (sync == NET_ASYNC)
+        if (__USE_ASYNC(opts))
             if ((fcntl(net_socket.fd, F_SETFL,
                     fcntl(net_socket.fd, F_GETFL) | O_NONBLOCK)) < 0)
                 return netClose(net_socket);
@@ -319,7 +331,7 @@ extern "C" {
     }
 
     NetSocket
-    netDialSSL(char *server, int port, NetSync sync) {
+    __netDialTCP(char *server, int port, int opts) {
 
         int err, err2;
         BIO *certbio = NULL;
@@ -371,7 +383,7 @@ extern "C" {
         /* ---------------------------------------------------------- *
          * Make the underlying TCP socket connection                  *
          * ---------------------------------------------------------- */
-        tcpsocket = netDialTCP(NET_TCP, server, port, sync);
+        tcpsocket = __netDialSSL(server, port, opts);
         socket.fd = tcpsocket.fd;
 
         if (socket.fd < 0)
@@ -426,15 +438,23 @@ extern "C" {
         return rsocket;
     }
 
+    /*
+     * Opts can be:
+     * - NET_TCP/NET_UDP
+     * - NET_SYNC/NET_ASYNC
+     * - NET_NOSSL/NET_SSL
+     *
+     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
+     */
     NetSocket
-    netAnnounce(NetType istcp, char *server, int port, NetSync sync) {
+    netAnnounce(char *server, int port, int opts) {
         int n, proto;
         struct sockaddr_in sa;
         socklen_t sn;
         uint32_t ip;
         NetSocket netsocket = {NULL, NULL, NULL, -1};
 
-        if (istcp == NET_UDP) {
+        if (__USE_UDP(opts)) {
             proto = SOCK_DGRAM;
         } else {
             proto = SOCK_STREAM;
@@ -452,7 +472,7 @@ extern "C" {
         }
 
         /* set reuse flag for tcp */
-        if (istcp && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE,
+        if ((!__USE_UDP(opts)) && getsockopt(netsocket.fd, SOL_SOCKET, SO_TYPE,
                 (void*) &n, &sn) >= 0) {
             n = 1;
             setsockopt(netsocket.fd, SOL_SOCKET,
@@ -466,7 +486,7 @@ extern "C" {
         if (proto == SOCK_STREAM)
             listen(netsocket.fd, 16);
 
-        if (sync == NET_ASYNC)
+        if (__USE_ASYNC(opts))
             if ((fcntl(netsocket.fd, F_SETFL,
                     fcntl(netsocket.fd, F_GETFL) | O_NONBLOCK)) < 0)
                 return netClose(netsocket);
@@ -474,16 +494,15 @@ extern "C" {
         return netsocket;
     }
 
-    NetSocket
-    netDial(NetType socktype, char *server, int port) {
-        if (socktype == NET_SSL) {
-            return netDialSSL(server, port, NET_SYNC);
-        } else {
-            return netDialTCP(socktype, server, port, NET_SYNC);
-        }
-    }
-
     /*
+     * Opts can be:
+     * - NET_TCP/NET_UDP
+     * - NET_SYNC/NET_ASYNC
+     * - NET_NOSSL/NET_SSL
+     *
+     * Default (0) is the same as NET_TCP | NET_SYNC | NET_NOSSL
+     *
+     * IF NET_ASYNC:
      * Next calls to connect, netRead and readWrite will return immediately if
      * fd is not ready for various reason (asynchrnous):
      * - return -1, with errno = EINPROGRESS for connect
@@ -495,13 +514,14 @@ extern "C" {
      * This will presently fail for ssl connections.
      */
     NetSocket
-    netAsyncDial(NetType socktype, char *server, int port) {
-        if (socktype == NET_SSL) {
-            return netDialSSL(server, port, NET_ASYNC);
+    netDial(char *server, int port, int opts) {
+        if (__USE_SSL(opts)) {
+            return __netDialTCP(server, port, opts);
         } else {
-            return netDialTCP(socktype, server, port, NET_ASYNC);
+            return __netDialSSL(server, port, opts);
         }
     }
+
 
 #ifdef __cplusplus
 }

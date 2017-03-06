@@ -37,9 +37,9 @@ target_link_libraries(async_tcp_client ${OPENSSL_LIBRARIES})
 enable_testing()
 add_test(
     NAME BLOCKING_TEST
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_blocking_tests.sh
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_blocking_tcp_tests.sh
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(
     NAME ASYNC_TEST
-    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_async_tests.sh
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/test/run_async_tcp_tests.sh
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

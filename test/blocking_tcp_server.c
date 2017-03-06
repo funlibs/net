@@ -1,12 +1,13 @@
 #include <net.h>
 #include <stdio.h>
 
-#define MSG_MAX 15
+#define MSG_MAX 30
 
 int main(int argc, char** argv) {
-    char remote_says[MSG_MAX + 1];
+    int c;
+    char remote_says[MSG_MAX + 1], message[] = "hello from server\n";
     NetSocket listen, rsocket;
-    listen = netAnnounce(NET_TCP, 0, 8889, NET_SYNC);
+    listen = netAnnounce(0, 8889, NET_TCP | NET_SYNC);
 
     rsocket = netAccept(listen);
     if (rsocket.fd < 0) {
@@ -14,9 +15,10 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    netRead(rsocket, remote_says, MSG_MAX);
+    c = netRead(rsocket, remote_says, MSG_MAX);
+    remote_says[c] = '\0';
     printf("SERVER: have received %s from remote client\n", remote_says);
-    netWrite(rsocket, "Hello", MSG_MAX);
+    netWrite(rsocket, message, strlen(message));
     printf("SERVER: have sent hello to client\n");
     netClose(rsocket);
 
