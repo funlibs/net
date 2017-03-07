@@ -16,9 +16,13 @@ handle_socketEvent(NetSocket *socket) {
 
     remote_says[r] = '\0';
     printf("REMOTE_SAYS: %s", remote_says);
-    netWrite(*socket, message, strlen(message));
-    netClose(*socket);
-    free(socket);
+    netWrite(*socket, remote_says, strlen(remote_says));
+    if (strcmp(remote_says, "exit\r\n") == 0) {
+        printf("Will close\n");
+        netWrite(*socket, message, strlen(message));
+        netClose(*socket);
+        free(socket);
+    }
 }
 
 int main(int argc, char** argv) {
@@ -39,7 +43,7 @@ int main(int argc, char** argv) {
 
     evt.data.ptr = &listen;
     evt.events = EPOLLIN;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen.fd, &evt) > 0) {
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD, listen.fd, &evt) != 0) {
         printf("ERROR: in epoll ctl %i\n", errno);
         netClose(listen);
         exit(EXIT_FAILURE);
